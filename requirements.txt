@@ -1,1 +1,9 @@
 # Runtime dependencies
+
+openai>=1.99.0
+google-genai>=1.30.0
+
+pydub>=0.25.1
+ffmpeg-python>=0.2.0
+
+python-dotenv>=1.1.0
