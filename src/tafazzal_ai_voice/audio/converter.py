@@ -1,8 +1,8 @@
 """
-Production-ready audio converter.
+Production Audio Converter
 
 Tafazzal AI Voice Studio
-Version: 1.1
+Version 1.1
 """
 
 from __future__ import annotations
@@ -11,24 +11,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from pydub import AudioSegment
+
+from tafazzal_ai_voice.audio.formats import (
+    AudioFormatRegistry,
+)
 from tafazzal_ai_voice.logging.logger import logger
 
 
-SUPPORTED_AUDIO_FORMATS: Final[frozenset[str]] = frozenset(
-    {
-        ".wav",
-        ".mp3",
-        ".flac",
-        ".ogg",
-        ".m4a",
-    }
-)
-
-
 class AudioConversionError(Exception):
-    """
-    Raised when audio conversion fails.
-    """
+    """Raised when audio conversion fails."""
 
 
 @dataclass(slots=True)
@@ -43,21 +35,21 @@ class ConversionRequest:
 
 class AudioConverter:
     """
-    Production audio converter.
-
-    Uses FFmpeg backend through pydub.
+    Production Audio Converter.
     """
 
     def __init__(self) -> None:
 
-        logger.info("AudioConverter initialized.")
+        logger.info(
+            "AudioConverter initialized."
+        )
 
     @staticmethod
     def validate_input(
         input_file: str | Path,
     ) -> Path:
         """
-        Validate input audio.
+        Validate input file.
         """
 
         path = Path(input_file)
@@ -67,13 +59,12 @@ class AudioConverter:
 
         if not path.is_file():
             raise AudioConversionError(
-                "Input is not a file."
+                "Input path is not a file."
             )
 
-        if path.suffix.lower() not in SUPPORTED_AUDIO_FORMATS:
-            raise AudioConversionError(
-                f"Unsupported input format: {path.suffix}"
-            )
+        AudioFormatRegistry.from_extension(
+            path.suffix
+        )
 
         return path
 
@@ -82,15 +73,14 @@ class AudioConverter:
         output_file: str | Path,
     ) -> Path:
         """
-        Validate output path.
+        Validate output file.
         """
 
         path = Path(output_file)
 
-        if path.suffix.lower() not in SUPPORTED_AUDIO_FORMATS:
-            raise AudioConversionError(
-                f"Unsupported output format: {path.suffix}"
-            )
+        AudioFormatRegistry.from_extension(
+            path.suffix
+        )
 
         path.parent.mkdir(
             parents=True,
@@ -105,18 +95,20 @@ class AudioConverter:
         output_file: str | Path,
     ) -> ConversionRequest:
         """
-        Build validated conversion request.
+        Create validated request.
         """
 
         request = ConversionRequest(
-            input_file=self.validate_input(input_file),
-            output_file=self.validate_output(output_file),
+            input_file=self.validate_input(
+                input_file,
+            ),
+            output_file=self.validate_output(
+                output_file,
+            ),
         )
 
         logger.info(
-            "Conversion request created: %s -> %s",
-            request.input_file.name,
-            request.output_file.name,
+            "Conversion request created."
         )
 
         return request
@@ -126,10 +118,8 @@ class AudioConverter:
         output_file: str | Path,
     ) -> Path:
         """
-        Convert audio using pydub + FFmpeg.
+        Convert audio using FFmpeg (via pydub).
         """
-
-        from pydub import AudioSegment
 
         request = self.create_request(
             input_file=input_file,
@@ -140,21 +130,23 @@ class AudioConverter:
 
             logger.info(
                 "Loading audio: %s",
-                request.input_file,
+                request.input_file.name,
             )
 
             audio = AudioSegment.from_file(
-                request.input_file
+                request.input_file,
             )
 
             export_format = (
-                request.output_file.suffix
-                .lower()
-                .replace(".", "")
+                AudioFormatRegistry
+                .from_extension(
+                    request.output_file.suffix,
+                )
+                .value
             )
 
             logger.info(
-                "Exporting audio as %s",
+                "Export format: %s",
                 export_format,
             )
 
@@ -163,14 +155,16 @@ class AudioConverter:
                 format=export_format,
             )
 
-            if not request.output_file.exists():
-
+            if (
+                not request.output_file.exists()
+                or request.output_file.stat().st_size == 0
+            ):
                 raise AudioConversionError(
                     "Output file was not created."
                 )
 
             logger.info(
-                "Audio conversion completed."
+                "Conversion completed successfully."
             )
 
             return request.output_file
@@ -184,14 +178,12 @@ class AudioConverter:
             raise AudioConversionError(
                 str(exc)
             ) from exc
-                def convert_to_mp3(
+
+    def convert_to_mp3(
         self,
         input_file: str | Path,
         output_file: str | Path,
     ) -> Path:
-        """
-        Convert audio to MP3.
-        """
 
         return self.convert(
             input_file,
@@ -203,9 +195,6 @@ class AudioConverter:
         input_file: str | Path,
         output_file: str | Path,
     ) -> Path:
-        """
-        Convert audio to WAV.
-        """
 
         return self.convert(
             input_file,
@@ -217,9 +206,6 @@ class AudioConverter:
         input_file: str | Path,
         output_file: str | Path,
     ) -> Path:
-        """
-        Convert audio to FLAC.
-        """
 
         return self.convert(
             input_file,
@@ -231,9 +217,6 @@ class AudioConverter:
         input_file: str | Path,
         output_file: str | Path,
     ) -> Path:
-        """
-        Convert audio to OGG.
-        """
 
         return self.convert(
             input_file,
@@ -245,9 +228,6 @@ class AudioConverter:
         input_file: str | Path,
         output_file: str | Path,
     ) -> Path:
-        """
-        Convert audio to M4A.
-        """
 
         return self.convert(
             input_file,
@@ -268,6 +248,10 @@ class AudioConverter:
             exist_ok=True,
         )
 
+        registry_format = AudioFormatRegistry.validate(
+            output_format,
+        )
+
         results: list[Path] = []
 
         for file in files:
@@ -275,8 +259,8 @@ class AudioConverter:
             source = Path(file)
 
             destination = (
-                output_dir /
-                f"{source.stem}.{output_format.lower()}"
+                output_dir
+                / f"{source.stem}.{registry_format.value}"
             )
 
             results.append(
@@ -287,7 +271,7 @@ class AudioConverter:
             )
 
         logger.info(
-            "Batch conversion completed: %s file(s)",
+            "Batch conversion completed (%s file(s)).",
             len(results),
         )
 
@@ -324,7 +308,7 @@ class AudioConverter:
         output_file: str | Path,
     ) -> dict[str, object]:
         """
-        Health check for converted audio.
+        Converter health report.
         """
 
         path = Path(output_file)
@@ -338,6 +322,7 @@ class AudioConverter:
                 else 0
             ),
             "extension": path.suffix.lower(),
+            "status": "healthy",
         }
 
 
