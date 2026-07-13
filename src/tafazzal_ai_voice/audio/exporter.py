@@ -1,51 +1,40 @@
 """
-Production-ready audio exporter.
+Production Audio Exporter
 
 Tafazzal AI Voice Studio
-Version: 1.1
+Version 1.1
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
 
+from pydub import AudioSegment
+
+from tafazzal_ai_voice.audio.formats import (
+    AudioFormatRegistry,
+)
 from tafazzal_ai_voice.logging.logger import logger
 
 
-SUPPORTED_EXPORT_FORMATS: Final[frozenset[str]] = frozenset(
-    {
-        "wav",
-        "mp3",
-        "flac",
-        "ogg",
-        "m4a",
-    }
-)
+class AudioExportError(Exception):
+    """Raised when audio export fails."""
 
 
 @dataclass(slots=True)
-class ExportProfile:
+class ExportRequest:
     """
-    Audio export configuration.
+    Audio export request.
     """
 
-    format: str
-    bitrate: str = "192k"
-    sample_rate: int = 44100
-    channels: int = 2
-
-
-class AudioExportError(Exception):
-    """
-    Raised when export fails.
-    """
+    audio: AudioSegment
+    output_file: Path
 
 
 class AudioExporter:
     """
-    Production audio exporter.
+    Production Audio Exporter.
     """
 
     def __init__(self) -> None:
@@ -53,24 +42,6 @@ class AudioExporter:
         logger.info(
             "AudioExporter initialized."
         )
-
-    @staticmethod
-    def validate_format(
-        export_format: str,
-    ) -> str:
-        """
-        Validate export format.
-        """
-
-        export_format = export_format.lower()
-
-        if export_format not in SUPPORTED_EXPORT_FORMATS:
-
-            raise AudioExportError(
-                f"Unsupported export format: {export_format}"
-            )
-
-        return export_format
 
     @staticmethod
     def validate_output(
@@ -82,6 +53,10 @@ class AudioExporter:
 
         path = Path(output_file)
 
+        AudioFormatRegistry.from_extension(
+            path.suffix
+        )
+
         path.parent.mkdir(
             parents=True,
             exist_ok=True,
@@ -89,87 +64,74 @@ class AudioExporter:
 
         return path
 
-    def create_profile(
+    def create_request(
         self,
-        export_format: str,
-        bitrate: str = "192k",
-        sample_rate: int = 44100,
-        channels: int = 2,
-    ) -> ExportProfile:
+        audio: AudioSegment,
+        output_file: str | Path,
+    ) -> ExportRequest:
         """
-        Create validated export profile.
+        Create export request.
         """
 
-        profile = ExportProfile(
-            format=self.validate_format(
-                export_format,
+        request = ExportRequest(
+            audio=audio,
+            output_file=self.validate_output(
+                output_file,
             ),
-            bitrate=bitrate,
-            sample_rate=sample_rate,
-            channels=channels,
         )
 
         logger.info(
-            "Export profile created: %s",
-            profile.format,
+            "Export request created."
         )
 
-        return profile    def export(
+        return request
+            def export(
         self,
-        audio,
+        audio: AudioSegment,
         output_file: str | Path,
-        profile: ExportProfile,
     ) -> Path:
         """
-        Export audio using pydub + FFmpeg.
+        Export audio to the requested format.
         """
 
-        from pydub import AudioSegment
-
-        if not isinstance(audio, AudioSegment):
-            raise AudioExportError(
-                "audio must be a pydub.AudioSegment instance."
-            )
-
-        output_path = self.validate_output(output_file)
-
-        export_parameters: dict[str, object] = {
-            "format": profile.format,
-        }
-
-        if profile.format == "mp3":
-            export_parameters["bitrate"] = profile.bitrate
+        request = self.create_request(
+            audio=audio,
+            output_file=output_file,
+        )
 
         try:
 
-            processed_audio = (
-                audio.set_frame_rate(profile.sample_rate)
-                     .set_channels(profile.channels)
+            export_format = (
+                AudioFormatRegistry
+                .from_extension(
+                    request.output_file.suffix,
+                )
+                .value
             )
 
             logger.info(
-                "Exporting audio -> %s",
-                output_path.name,
+                "Exporting audio as %s",
+                export_format,
             )
 
-            processed_audio.export(
-                output_path,
-                **export_parameters,
+            request.audio.export(
+                request.output_file,
+                format=export_format,
             )
 
             if (
-                not output_path.exists()
-                or output_path.stat().st_size == 0
+                not request.output_file.exists()
+                or request.output_file.stat().st_size == 0
             ):
                 raise AudioExportError(
-                    "Export failed. Output file is empty."
+                    "Export failed."
                 )
 
             logger.info(
                 "Audio exported successfully."
             )
 
-            return output_path
+            return request.output_file
 
         except Exception as exc:
 
@@ -179,93 +141,110 @@ class AudioExporter:
 
             raise AudioExportError(
                 str(exc)
-            ) from exc    def export_mp3(
-        self,
-        audio,
-        output_file: str | Path,
-        bitrate: str = "192k",
-    ) -> Path:
-
-        profile = self.create_profile(
-            export_format="mp3",
-            bitrate=bitrate,
-        )
-
-        return self.export(
-            audio,
-            output_file,
-            profile,
-        )
-
+            ) from exc
 
     def export_wav(
         self,
-        audio,
+        audio: AudioSegment,
         output_file: str | Path,
     ) -> Path:
-
-        profile = self.create_profile(
-            export_format="wav",
-        )
+        """
+        Export as WAV.
+        """
 
         return self.export(
             audio,
             output_file,
-            profile,
         )
 
+    def export_mp3(
+        self,
+        audio: AudioSegment,
+        output_file: str | Path,
+    ) -> Path:
+        """
+        Export as MP3.
+        """
+
+        return self.export(
+            audio,
+            output_file,
+        )
 
     def export_flac(
         self,
-        audio,
+        audio: AudioSegment,
         output_file: str | Path,
     ) -> Path:
-
-        profile = self.create_profile(
-            export_format="flac",
-        )
+        """
+        Export as FLAC.
+        """
 
         return self.export(
             audio,
             output_file,
-            profile,
         )
-
 
     def export_ogg(
         self,
-        audio,
+        audio: AudioSegment,
         output_file: str | Path,
     ) -> Path:
-
-        profile = self.create_profile(
-            export_format="ogg",
-        )
+        """
+        Export as OGG.
+        """
 
         return self.export(
             audio,
             output_file,
-            profile,
         )
-
 
     def export_m4a(
         self,
-        audio,
+        audio: AudioSegment,
         output_file: str | Path,
     ) -> Path:
-
-        profile = self.create_profile(
-            export_format="m4a",
-        )
+        """
+        Export as M4A.
+        """
 
         return self.export(
             audio,
             output_file,
-            profile,
-        )    def batch_export(
+        )    @staticmethod
+    def verify_output(
+        output_file: str | Path,
+    ) -> bool:
+        """
+        Verify exported audio file.
+        """
+
+        path = Path(output_file)
+
+        return (
+            path.exists()
+            and path.is_file()
+            and path.stat().st_size > 0
+        )
+
+    @staticmethod
+    def file_size(
+        output_file: str | Path,
+    ) -> int:
+        """
+        Return exported file size.
+        """
+
+        path = Path(output_file)
+
+        if not path.exists():
+            return 0
+
+        return path.stat().st_size
+
+    def batch_export(
         self,
-        audio,
+        audio: AudioSegment,
         output_directory: str | Path,
         base_name: str,
         formats: list[str],
@@ -281,82 +260,39 @@ class AudioExporter:
             exist_ok=True,
         )
 
-        results: list[Path] = []
+        exported: list[Path] = []
 
-        for export_format in formats:
+        for fmt in formats:
+
+            audio_format = (
+                AudioFormatRegistry.validate(fmt)
+            )
 
             output_file = (
-                output_dir /
-                f"{base_name}.{export_format.lower()}"
+                output_dir
+                / f"{base_name}.{audio_format.value}"
             )
 
-            profile = self.create_profile(
-                export_format=export_format,
-            )
-
-            results.append(
+            exported.append(
                 self.export(
-                    audio=audio,
-                    output_file=output_file,
-                    profile=profile,
+                    audio,
+                    output_file,
                 )
             )
 
         logger.info(
             "Batch export completed (%s file(s)).",
-            len(results),
+            len(exported),
         )
 
-        return results
-
-    @staticmethod
-    def verify_output(
-        output_file: str | Path,
-    ) -> bool:
-        """
-        Verify exported file.
-        """
-
-        path = Path(output_file)
-
-        return (
-            path.exists()
-            and path.is_file()
-            and path.stat().st_size > 0
-        )
-
-    @staticmethod
-    def export_profiles() -> dict[str, ExportProfile]:
-        """
-        Built-in export profiles.
-        """
-
-        return {
-            "youtube": ExportProfile(
-                format="mp3",
-                bitrate="320k",
-                sample_rate=48000,
-                channels=2,
-            ),
-            "podcast": ExportProfile(
-                format="mp3",
-                bitrate="192k",
-                sample_rate=44100,
-                channels=2,
-            ),
-            "studio": ExportProfile(
-                format="wav",
-                sample_rate=48000,
-                channels=2,
-            ),
-        }
+        return exported
 
     def health_check(
         self,
         output_file: str | Path,
     ) -> dict[str, object]:
         """
-        Export health report.
+        Exporter health report.
         """
 
         path = Path(output_file)
@@ -364,12 +300,9 @@ class AudioExporter:
         return {
             "exists": path.exists(),
             "verified": self.verify_output(path),
-            "size": (
-                path.stat().st_size
-                if path.exists()
-                else 0
-            ),
+            "size": self.file_size(path),
             "extension": path.suffix.lower(),
+            "status": "healthy",
         }
 
 
